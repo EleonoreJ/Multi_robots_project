@@ -17,6 +17,12 @@ function [Px, Py] = lloydsAlgorithm(Px,Py, crs, numIterations, showPlot)
 %lloydsAlgorithm(0.01*rand(50,1),zeros(50,1)+1/2, [0,0;0,1;1,1;1,0], 200, true)
 %
 % Made by: Aaron Becker, atbecker@uh.edu
+% Modified by: Eleonore Jacquemet
+
+%To run the simulation:
+% lloydsAlgorithm([2;10*rand(7,1)],[4;5*rand(7,1)], [0,0;0,1;1,1;1,0], 100, true)
+
+
 close all
 format compact
 
@@ -24,6 +30,58 @@ format compact
 sd = 20;
 rng(sd)
 
+xrange = 10;  %region size
+yrange = 5;
+n = 7;
+
+% Define the environment you want, by default map 3 is a convex bounded
+% environment. 
+
+map = 3;
+
+
+if map == 3
+    crs = [ 0, 0;    
+            0, yrange;
+            xrange, yrange;
+            xrange, 0];
+end
+
+% Non convex environment
+% a world with a narrow passage
+
+if map == 2
+    crs = [ 0, 0;   
+            0, yrange;
+            1/3*xrange, yrange;
+            1/3*xrange, 2/3*yrange;
+            2/3*xrange, 2/3*yrange;
+            2/3*xrange, 2/3*yrange;
+            2/3*xrange, yrange;
+            xrange, yrange;
+            xrange, 0;
+            2/3*xrange, 0;
+            2/3*xrange, 1/3*yrange;
+            1/3*xrange, 1/3*yrange;
+            1/3*xrange, 0];
+end
+
+% Non convex environment
+% a world with a narrow passage
+if map == 1
+    crs = [ 0, 0;    
+            0, yrange;
+            1/3*xrange, yrange;  
+            1/3*xrange, 1/4*yrange;
+            2/3*xrange, 1/4*yrange;
+            2/3*xrange, yrange;
+            xrange, yrange;
+            xrange, 0];
+end
+    
+  
+% Px = [5;0.1*rand(n,1)*xrange]; % place n  robots randomly
+% Py = [3;0.1*rand(n,1)*yrange];
 
 
 if nargin < 1   % demo mode
@@ -36,19 +94,7 @@ if nargin < 1   % demo mode
 % Generate and Place  n stationary robots
     Px = 0.01*mod(1:n,ceil(sqrt(n)))'*xrange; %start the robots in a small grid
     Py = 0.01*floor((1:n)/sqrt(n))'*yrange;
-    
-%     Px = 0.1*rand(n,1)*xrange; % place n  robots randomly
-%     Py = 0.1*rand(n,1)*yrange;
-    
-    crs = [ 0, 0;    
-        0, yrange;
-        1/3*xrange, yrange;  % a world with a narrow passage
-        1/3*xrange, 1/4*yrange;
-        2/3*xrange, 1/4*yrange;
-        2/3*xrange, yrange;
-        xrange, yrange;
-        xrange, 0];
-    
+
     for i = 1:numel(Px)  
         while ~inpolygon(Px(i),Py(i),crs(:,1),crs(:,2))% ensure robots are inside the boundary
             Px(i) = rand(1,1)*xrange; 
@@ -99,17 +145,62 @@ for counter = 1:numIterations
     end
     
     for i = 1:numel(c) %calculate the centroid of each cell
-        [cx,cy] = PolyCentroid(v(c{i},1),v(c{i},2));
+       
+        [cx,cy, neighbors] = PolyCentroid(v(c{i},1),v(c{i},2),v(c{1},1),v(c{1},2));
+        
+        % Evador dynamics
+        if i==1
+            maximum = 0;
+            idx = 0; 
+            xvertices = v(c{1},1);
+            yvertices = v(c{1},2)
+            for j=1:numel(v(c{1},1))
+                
+                distance = norm([Px(1)-xvertices(j); Py(1)-yvertices(j)]);
+                
+                if distance > maximum  
+                    maximum = distance;
+                    idx = j;
+                end
+                
+            end
+            if inpolygon(xvertices(idx),yvertices(idx),crs(:,1),crs(:,2))
+                cx = xvertices(idx);
+                cy = yvertices(idx);
+            end
+        end
+        
         cx = min(xrange,max(0, cx));
         cy = min(yrange,max(0, cy));
-        if ~isnan(cx) && inpolygon(cx,cy,crs(:,1),crs(:,2))
-            Px(i) = cx;  %don't update if goal is outside the polygon
-            Py(i) = cy;
+        
+        % dynamics for evador neighbors
+        if ~isnan(cx) && inpolygon(cx,cy,crs(:,1),crs(:,2))           
+            m = (Py(i) - cy)/(Px(i)-cx);
+            Px_prev = Px(i);
+            
+            % Module pursuers speed
+            dmax = 0.5;
+            
+            % Module evadors speed
+            if i == 1
+                dmax = 0.9;
+            end  
+            
+            Px_new = sign(cx - Px_prev)*dmax/sqrt(1+m^2)+ Px_prev;
+            Py_new = m*(Px_new-Px_prev) + Py(i);
+            if dmax < norm([Px(i) - cx; Py(i) - cy])
+                Px(i) = Px_new;
+                Py(i) = Py_new;
+            
+            else
+                Px(i) = cx;
+                Py(i) = cy;
+            end
         end
     end
     
     if showPlot
-        for i = 1:numel(c) % update Voronoi cells
+        for i = 2:numel(c) % update Voronoi cells
             set(verCellHandle(i), 'XData',v(c{i},1),'YData',v(c{i},2));
         end
 
@@ -119,26 +210,57 @@ for counter = 1:numIterations
         axis equal
         axis([0,xrange,0,yrange]);
         drawnow
-%         if mod(counter,50) ==0
+        if mod(counter,1) ==0
 %             pause
-%             %pause(0.1)
-%         end
+            pause(0.1)
+        end
+    end
+    
+    physical_robot = false;
+    if physical_robot == true
+        for robot = 2:numel(Px)
+            capture = 0.2;
+            if norm([Px(1)-Px(j); Py(1)-Py(j)]) < capture
+                break
+            end
+        end
     end
 end
 
-function [Cx,Cy] = PolyCentroid(X,Y)
+function [Cx,Cy, neighbors] = PolyCentroid(X,Y,X0,Y0)
 % POLYCENTROID returns the coordinates for the centroid of polygon with vertices X,Y
 % The centroid of a non-self-intersecting closed polygon defined by n vertices (x0,y0), (x1,y1), ..., (xn?1,yn?1) is the point (Cx, Cy), where
 % In these formulas, the vertices are assumed to be numbered in order of their occurrence along the polygon's perimeter, and the vertex ( xn, yn ) is assumed to be the same as ( x0, y0 ). Note that if the points are numbered in clockwise order the area A, computed as above, will have a negative sign; but the centroid coordinates will be correct even in this case.http://en.wikipedia.org/wiki/Centroid
 % A = polyarea(X,Y)
 
-Xa = [X(2:end);X(1)];
-Ya = [Y(2:end);Y(1)];
 
-A = 1/2*sum(X.*Ya-Xa.*Y); %signed area of the polygon
+% Dynamics for the evadors neighbors 
+neighbors = false;
+vertices = zeros(length(X),2);
+vertices(:,1) = X;
+vertices(:,2) = Y;
+evador = zeros(length(X0),2);
+evador(:,1) = X0;
+evador(:,2) = Y0;
 
-Cx = (1/(6*A)*sum((X + Xa).*(X.*Ya-Xa.*Y)));
-Cy = (1/(6*A)*sum((Y + Ya).*(X.*Ya-Xa.*Y)));
+inter = intersect(vertices, evador, 'rows');
+inter;
+
+if size(inter)== [2;2]
+    neighbors = true;
+    Cx = (inter(1,1)+inter(2,1))/2;
+    Cy = (inter(1,2)+inter(2,2))/2;
+
+% Coverage for the other robots
+else
+    Xa = [X(2:end);X(1)];
+    Ya = [Y(2:end);Y(1)];
+
+    A = 1/2*sum(X.*Ya-Xa.*Y); %signed area of the polygon
+
+    Cx = (1/(6*A)*sum((X + Xa).*(X.*Ya-Xa.*Y)));
+    Cy = (1/(6*A)*sum((Y + Ya).*(X.*Ya-Xa.*Y)));
+end
 
 function [V,C]=VoronoiBounded(x,y, crs)
 % VORONOIBOUNDED computes the Voronoi cells about the points (x,y) inside
@@ -157,14 +279,22 @@ midx = (max(crs(:,1))+min(crs(:,1)))/2;
 midy = (max(crs(:,2))+min(crs(:,2)))/2;
 
 % add 4 additional edges
-xA = [x; midx + [0;0;-5*rg;+5*rg]];
+xA = [x; midx + [0;0;-5*rg;5*rg]];
 yA = [y; midy + [-5*rg;+5*rg;0;0]];
+
+
+
 
 [vi,ci]=voronoin([xA,yA]);
 
 % remove the last 4 cells
 C = ci(1:end-4);
 V = vi;
+
+% add boundaries
+% V = [V; crs];
+
+
 % use Polybool to crop the cells
 %Polybool for restriction of polygons to domain.
 
@@ -200,5 +330,38 @@ for ij=1:length(C)
    
 end
 
+%% Variant simulations
 
+% Simulation 1: pursuers direct go to goals with fixed evadors
+% Make sure you have these lines:
+% line 170 : for i = 2:numel(c) %calculate the centroid of each cell
+% line 214 : if false %dmax < norm([Px(i) - cx; Py(i) - cy])
+
+% To run the simulation
+% lloydsAlgorithm([2;2*rand(5,1)],[2.5;2*rand(5,1)], [0,0;0,1;1,1;1,0], 10, true)
+
+% Simulation 2 : pursuers with maximum speeds with fixed evadors
+% Make sure you have these lines:
+% line 170 : for i = 2:numel(c) %calculate the centroid of each cell
+% line 214 : if dmax < norm([Px(i) - cx; Py(i) - cy])
+
+% To run the simulation
+% lloydsAlgorithm([5;10*rand(5,1)],[2;7*rand(5,1)], [0,0;0,1;1,1;1,0], 13, true)
+
+% Simulation 3 : same with evadors moving
+% Make sure you have these lines
+% line 170 : for i = 1:numel(c) %calculate the centroid of each cell
+% line 179 : if i==0
+% line 211 : if i == 0
+
+% To run the simulation: 
+% lloydsAlgorithm([5;10*rand(5,1)],[2;7*rand(5,1)], [0,0;0,1;1,1;1,0], 9, true)
+
+% Simulation 3 : same with evadors trying to escape with same speed
+% lloydsAlgorithm([5;10*rand(5,1)],[2;7*rand(5,1)], [0,0;0,1;1,1;1,0], 13, true)
+% line 170 : for i = 1:numel(c) %calculate the centroid of each cell
+% line 179 : if i==1
+% line 211 : if i == 1
+% Make sure you put the same speed for the escaper and the pursuers line
+% 215 and 218
 
